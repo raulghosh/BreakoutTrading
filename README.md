@@ -48,23 +48,54 @@ one-bar trigger. See the [original-rule → fix table](docs/breakout_strategy_de
 ## Project layout
 
 ```
-src/breakout/
-  config.py            # load settings.yaml + .env
-  indicators/core.py   # ONE shared indicator lib (ATR, MAs, 52wk/ATH, BB width, RS) — used by screen AND backtest
-  screen/              # L0–L7 funnel
-    types.py           #   Candidate / LayerResult dataclasses
-    l0_universe.py … l7_compose.py
-    funnel.py          #   orchestration: run a symbol/universe through the funnel
-  data/                # provider interfaces + bar store (Phase 1)
-    base.py, alpaca.py, schwab.py, store.py, adjust.py
-  news/                # Section 5 overlay (Phase 5, stubs)
-    theme_graph.py, catalyst_llm.py, attention.py
-  backtest/            # Section 6 harness (Phase 3, stubs + metrics)
-    engine.py, metrics.py
-  cli.py               # `breakout screen ...`
-config/settings.yaml   # all tunable thresholds
-docs/                  # design document
-tests/                 # synthetic-data tests (run with no API keys)
+BreakoutStrategy/
+├── README.md
+├── pyproject.toml                  # packaging + deps + `breakout` console script
+├── config/
+│   └── settings.yaml               # all tunable thresholds (the parameter register)
+├── docs/
+│   └── breakout_strategy_design.md # v1.0 design document
+├── src/
+│   └── breakout/
+│       ├── __init__.py
+│       ├── cli.py                  # `breakout demo` / `breakout screen ...`
+│       ├── config.py               # load settings.yaml + .env
+│       ├── synthetic.py            # synthetic OHLCV for tests + demo (no API keys)
+│       ├── indicators/
+│       │   ├── __init__.py
+│       │   └── core.py             # ONE shared indicator lib (ATR, MAs, 52wk/ATH, BB width, RS)
+│       ├── screen/                 # L0–L7 screening funnel
+│       │   ├── __init__.py
+│       │   ├── types.py            # Candidate / LayerResult / RiskPlan dataclasses
+│       │   ├── funnel.py           # orchestration: run a symbol through the funnel
+│       │   ├── l0_universe.py      # liquidity gate
+│       │   ├── l1_regime.py        # market-regime gate
+│       │   ├── l2_trend.py         # Stage-2 trend gate
+│       │   ├── l3_setup.py         # setup-quality score
+│       │   ├── l4_trigger.py       # breakout trigger gate (Track A)
+│       │   ├── l5_group.py         # group/theme score
+│       │   ├── l6_catalyst.py      # catalyst/news score
+│       │   └── l7_compose.py       # composite + risk template
+│       ├── data/                   # provider interfaces + bar store (Phase 1)
+│       │   ├── __init__.py
+│       │   ├── base.py             # BarProvider / NewsProvider protocols
+│       │   ├── alpaca.py           # Alpaca adapter (stub pending keys)
+│       │   ├── schwab.py           # Schwab adapter (stub pending keys)
+│       │   ├── store.py            # Parquet bar cache
+│       │   └── adjust.py           # split/dividend back-adjustment
+│       ├── news/                   # news & theme overlay (stubs)
+│       │   ├── __init__.py
+│       │   ├── theme_graph.py
+│       │   ├── catalyst_llm.py
+│       │   └── attention.py
+│       └── backtest/               # backtest harness
+│           ├── __init__.py
+│           ├── engine.py           # point-in-time loop (scaffold)
+│           └── metrics.py          # R-multiple expectancy metrics
+└── tests/                          # synthetic-data tests (run with no API keys)
+    ├── test_indicators.py
+    ├── test_funnel.py
+    └── test_backtest_metrics.py
 ```
 
 ## Quickstart
