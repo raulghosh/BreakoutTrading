@@ -1,0 +1,57 @@
+# Default parameters for the screening funnel.
+# Every threshold here is a HYPOTHESIS to validate (Section 6), not a fact.
+# Tune only on in-sample data; confirm out-of-sample.
+
+universe:                      # L0 — liquidity gate
+  min_price: 7.0               # avoid sub-$5 noise (tune 5-10)
+  min_dollar_volume: 15_000_000   # 20-day avg $ volume floor (tradeability)
+  min_history_days: 130        # ~6 months; 52wk-high undefined below this
+  exclude_leveraged_etfs: true
+
+regime:                        # L1 — market regime (gate that scales exposure)
+  benchmark: SPY
+  ma_period: 200
+  require_above_ma: true
+  require_rising_ma: true      # 200d slope >= 0
+  rising_lookback: 21          # ~1 month
+
+trend:                         # L2 — Minervini Stage-2 trend template
+  ma_fast: 50
+  ma_mid: 150
+  ma_slow: 200
+  slow_rising_lookback: 21
+  within_high_pct: 0.25        # close within 25% of 52wk high
+  above_low_pct: 0.30          # close >= 30% above 52wk low
+  tolerance: 0.0               # slack on MA-stack ordering
+
+setup:                         # L3 — setup quality (SCORE 0-1)
+  bbwidth_lookback: 252        # percentile window for squeeze
+  bbwidth_period: 20
+  atr_period: 20
+  base_lookback: 30            # bars defining the base
+  rs_lookback: 126             # ~6 months for RS rank
+  rs_short_lookback: 63        # ~3 months
+
+trigger:                       # L4 — breakout trigger (GATE)
+  pivot_lookback: 252          # 52wk high; base high also considered
+  atr_buffer_mult: 0.75        # pivot + 0.75 * ATR(20) ...
+  pct_buffer: 0.025            # ... or 2.5% of price, whichever is larger
+  volume_mult: 1.5             # breakout-bar volume >= 1.5x 50d avg
+  volume_avg_period: 50
+  require_range_expansion: true
+
+group:                         # L5 — group/theme confirmation (SCORE)
+  rs_lookback: 63
+
+risk:                          # L7 — risk template attached to every signal
+  account_risk_pct: 0.0075     # 0.75% equity risked per trade
+  atr_stop_mult: 1.5           # stop = entry - 1.5*ATR(20), or below pivot
+  first_target_r: 2.5          # partial at +2.5R
+  time_stop_days: 15           # exit if no progress in N days
+
+composite:                     # L7 — weights for scored layers (gates excluded)
+  weights:
+    setup: 0.35
+    group: 0.20
+    catalyst: 0.25
+    regime: 0.20

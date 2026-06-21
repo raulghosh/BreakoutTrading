@@ -1,0 +1,47 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "breakout"
+version = "0.1.0"
+description = "Early-stage breakout detection — gated screening funnel with RS/group/catalyst overlay and leak-free backtest"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Proprietary" }
+authors = [{ name = "Rahul Ghosh" }]
+dependencies = [
+    "numpy>=1.24",
+    "pandas>=2.0",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+# Live data providers (Phase 1+) — not needed to run the screen on cached/synthetic bars.
+data = [
+    "alpaca-py>=0.20",
+    "requests>=2.31",
+    "pyarrow>=14.0",      # parquet bar cache
+]
+# News/LLM catalyst overlay (Phase 5).
+news = [
+    "anthropic>=0.40",
+]
+dev = [
+    "pytest>=7.4",
+    "ruff>=0.5",
+]
+
+[project.scripts]
+breakout = "breakout.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
