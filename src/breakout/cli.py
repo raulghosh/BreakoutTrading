@@ -1,18 +1,26 @@
 """Command-line entry point.
 
-    breakout demo                 # run the funnel on a synthetic breakout (no keys needed)
-    breakout screen SYM [SYM..]   # run on cached bars in data/cache (Phase 1 providers fill it)
+    breakout demo                     # synthetic demo (no keys needed)
+    breakout screen SYM [SYM...]      # screen named symbols from the local bar cache
+    breakout fetch  SYM [SYM...]      # download bars from Alpaca into the cache
+    breakout scan   [--top N]         # screen every symbol in the cache
+    breakout universe [--save FILE]   # list tradeable US equities from Alpaca
 """
 from __future__ import annotations
 
 import argparse
 import json
 import sys
+from pathlib import Path
 
 from .config import Settings
 from .data.store import BarStore
 from .screen.funnel import screen_symbol
 
+
+# ---------------------------------------------------------------------------
+# Output helpers
+# ---------------------------------------------------------------------------
 
 def _print_candidate(cand) -> None:
     print(f"\n=== {cand.symbol} @ {cand.date.date()} ===")
@@ -32,6 +40,10 @@ def _print_candidate(cand) -> None:
         print(f"  -> REJECTED at {cand.rejected_at}")
 
 
+# ---------------------------------------------------------------------------
+# Commands
+# ---------------------------------------------------------------------------
+
 def cmd_demo(args) -> int:
     from .synthetic import make_benchmark, make_breakout_series
 
@@ -46,19 +58,57 @@ def cmd_demo(args) -> int:
     return 0
 
 
+def cmd_fetch(args) -> int:
+    """Download split-adjusted daily bars from Alpaca and save to the local cache."""
+    from datetime import datetime, timedelta
+    from .data.alpaca import AlpacaProvider
+
+    provider = AlpacaProvider()          # reads .env automatically
+    store = BarStore(args.cache)
+
+    end = datetime.today()
+    start = end - timedelta(days=args.lookback)
+
+    # Deduplicate; ensure benchmark is always fetched first
+    seen: dict[str, None] = {}
+    for sym in [args.benchmark] + list(args.symbols):
+        seen[sym.upper()] = None
+    symbols = list(seen)
+
+    ok, failed = 0, []
+    for sym in symbols:
+        print(f"  {sym:<8} ...", end=" ", flush=True)
+        try:
+            df = provider.daily_bars(sym, start, end)
+            if df.empty:
+                print("no data")
+                failed.append(sym)
+                continue
+            store.save(sym, df)
+            print(f"{len(df)} bars  ({df.index[0].date()} → {df.index[-1].date()})")
+            ok += 1
+        except Exception as exc:
+            print(f"FAIL  {exc}")
+            failed.append(sym)
+
+    print(f"\n{ok}/{len(symbols)} fetched"
+          + (f"  |  failures: {', '.join(failed)}" if failed else ""))
+    return 0 if not failed else 1
+
+
 def cmd_screen(args) -> int:
     settings = Settings.load(args.config)
     store = BarStore(args.cache)
     if not store.has(args.benchmark):
         print(f"benchmark bars for {args.benchmark} not in cache ({args.cache}). "
-              "Populate the cache via a data provider first (Phase 1).", file=sys.stderr)
+              f"Run: breakout fetch {args.benchmark}", file=sys.stderr)
         return 2
     bench = store.load(args.benchmark)
 
     survivors = []
     for sym in args.symbols:
         if not store.has(sym):
-            print(f"skip {sym}: not in cache", file=sys.stderr)
+            print(f"skip {sym}: not in cache (run: breakout fetch {sym})", file=sys.stderr)
             continue
         cand = screen_symbol(sym, store.load(sym), settings, benchmark_df=bench,
                              account_equity=args.equity)
@@ -73,22 +123,124 @@ def cmd_screen(args) -> int:
     return 0
 
 
+def cmd_scan(args) -> int:
+    """Run the funnel on every symbol in the bar cache and print the ranked signal list."""
+    settings = Settings.load(args.config)
+    store = BarStore(args.cache)
+
+    if not store.has(args.benchmark):
+        print(f"No benchmark bars for {args.benchmark}. "
+              f"Run: breakout fetch {args.benchmark}", file=sys.stderr)
+        return 2
+
+    bench = store.load(args.benchmark)
+    symbols = [s for s in store.symbols() if s != args.benchmark.upper()]
+    if not symbols:
+        print("No cached symbols. Run: breakout fetch SYM [SYM...]", file=sys.stderr)
+        return 2
+
+    print(f"Scanning {len(symbols)} symbol(s) ...")
+    survivors, rejected_counts = [], {}
+    for sym in symbols:
+        df = store.load(sym)
+        cand = screen_symbol(sym, df, settings, benchmark_df=bench,
+                             account_equity=args.equity)
+        if cand.passed_gates:
+            survivors.append(cand)
+        else:
+            rejected_counts[cand.rejected_at] = rejected_counts.get(cand.rejected_at, 0) + 1
+
+    survivors.sort(key=lambda c: c.composite or 0, reverse=True)
+    top = survivors[: args.top]
+
+    print(f"\n{len(survivors)} signal(s) from {len(symbols)} scanned:\n")
+    if top:
+        hdr = f"  {'#':<4} {'SYM':<8} {'COMP':>6}  {'ENTRY':>8}  {'STOP':>8}  {'TARGET':>8}  R"
+        print(hdr)
+        print("  " + "-" * (len(hdr) - 2))
+        for i, c in enumerate(top, 1):
+            r = c.risk
+            ath = "  [ATH]" if c.is_ath_breakout else ""
+            print(f"  {i:<4} {c.symbol:<8} {c.composite:>6.3f}  "
+                  f"{r.entry:>8.2f}  {r.stop:>8.2f}  {r.first_target:>8.2f}  "
+                  f"{r.r_multiple_to_target:.1f}R{ath}")
+
+    if rejected_counts:
+        print("\n  Rejections by gate:")
+        for gate, n in sorted(rejected_counts.items(), key=lambda x: -x[1]):
+            print(f"    {gate}: {n}")
+
+    return 0
+
+
+def cmd_universe(args) -> int:
+    """Fetch the list of active, tradeable US equity symbols from Alpaca."""
+    from .data.alpaca import AlpacaProvider
+
+    provider = AlpacaProvider()
+    print("Fetching tradeable US equity universe from Alpaca ...", flush=True)
+    symbols = provider.active_us_equities()
+    print(f"{len(symbols)} active tradeable US equities found.")
+
+    if args.save:
+        out = Path(args.save)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text("\n".join(symbols) + "\n")
+        print(f"Saved → {out}")
+    else:
+        for sym in symbols:
+            print(sym)
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# Argument parser
+# ---------------------------------------------------------------------------
+
 def main(argv=None) -> int:
-    p = argparse.ArgumentParser(prog="breakout", description=__doc__,
-                                formatter_class=argparse.RawDescriptionHelpFormatter)
+    p = argparse.ArgumentParser(
+        prog="breakout",
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     p.add_argument("--config", default=None, help="path to settings.yaml")
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    d = sub.add_parser("demo", help="run on a synthetic breakout series")
+    # demo ---------------------------------------------------------------
+    d = sub.add_parser("demo", help="run the funnel on a synthetic breakout series (no keys)")
     d.add_argument("--json", action="store_true")
     d.set_defaults(func=cmd_demo)
 
-    s = sub.add_parser("screen", help="run on cached bars")
-    s.add_argument("symbols", nargs="+")
+    # fetch --------------------------------------------------------------
+    f = sub.add_parser("fetch", help="download daily bars from Alpaca into the local cache")
+    f.add_argument("symbols", nargs="+", metavar="SYM", help="ticker(s) to fetch")
+    f.add_argument("--benchmark", default="SPY", help="always fetch this symbol too (default: SPY)")
+    f.add_argument("--lookback", type=int, default=504,
+                   help="calendar days of history to download (default: 504 ≈ 2 yrs)")
+    f.add_argument("--cache", default="data/cache")
+    f.set_defaults(func=cmd_fetch)
+
+    # screen -------------------------------------------------------------
+    s = sub.add_parser("screen", help="screen named cached symbols")
+    s.add_argument("symbols", nargs="+", metavar="SYM")
     s.add_argument("--benchmark", default="SPY")
     s.add_argument("--cache", default="data/cache")
     s.add_argument("--equity", type=float, default=100_000.0)
     s.set_defaults(func=cmd_screen)
+
+    # scan ---------------------------------------------------------------
+    sc = sub.add_parser("scan", help="screen every symbol in the bar cache")
+    sc.add_argument("--benchmark", default="SPY")
+    sc.add_argument("--equity", type=float, default=100_000.0)
+    sc.add_argument("--top", type=int, default=20, help="rows to show (default: 20)")
+    sc.add_argument("--cache", default="data/cache")
+    sc.set_defaults(func=cmd_scan)
+
+    # universe -----------------------------------------------------------
+    u = sub.add_parser("universe", help="list active US equity symbols from Alpaca")
+    u.add_argument("--save", metavar="FILE", default=None,
+                   help="write one symbol per line to FILE instead of stdout")
+    u.set_defaults(func=cmd_universe)
 
     args = p.parse_args(argv)
     return args.func(args)
