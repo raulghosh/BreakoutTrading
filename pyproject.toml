@@ -27,6 +27,12 @@ data = [
 news = [
     "anthropic>=0.40",
 ]
+# Interactive notebooks (notebooks/).
+notebooks = [
+    "jupyterlab>=4.0",
+    "matplotlib>=3.7",
+    "nbformat>=5.9",
+]
 dev = [
     "pytest>=7.4",
     "ruff>=0.5",

@@ -257,6 +257,30 @@ breakout backtest SNDK --equity 250000                       # different account
 
 ---
 
+## Interactive notebooks
+
+For a visual, click-to-explore version of the backtest, use the notebooks in
+[`notebooks/`](notebooks/):
+
+```bash
+pip install -e ".[notebooks]"
+jupyter lab notebooks/
+```
+
+| Notebook | What it does |
+|----------|-------------|
+| [`01_backtest_explorer.ipynb`](notebooks/01_backtest_explorer.ipynb) | Enter a ticker and a window, run the full backtest, and see a price chart with entries/exits, a trade log, and an equity curve vs buy-and-hold. |
+| [`02_point_in_time_check.ipynb`](notebooks/02_point_in_time_check.ipynb) | Enter a ticker and a **past date**. See exactly what the funnel said on that day (gate by gate, no look-ahead), then reveal what the stock actually did next — did it hit the target or the stop first? |
+
+Each notebook has a **Parameters** cell at the top — edit `TICKER` / `START` / `END` (or `AS_OF`),
+then *Run All*. Bars load from the local cache, fetching from Alpaca automatically if missing.
+
+> **Tip:** prefer long-history tickers (AAPL, MSFT, NVDA) for clean results. Recent spin-offs
+> (e.g. SNDK) have limited history and can show distorted buy-and-hold figures from their
+> when-issued opening prints.
+
+---
+
 ## Tuning
 
 All thresholds live in [`config/settings.yaml`](config/settings.yaml). Every number there is

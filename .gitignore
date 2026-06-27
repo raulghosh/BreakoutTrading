@@ -24,6 +24,9 @@ data/cache/
 reports/*.csv
 reports/*.json
 
+# Notebooks — keep the .ipynb, drop checkpoints
+.ipynb_checkpoints/
+
 # OS / editor
 .DS_Store
 .idea/
