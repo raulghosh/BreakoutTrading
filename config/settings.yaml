@@ -55,3 +55,11 @@ composite:                     # L7 — weights for scored layers (gates exclude
     group: 0.20
     catalyst: 0.25
     regime: 0.20
+
+backtest:                      # trade simulation (engine.py)
+  slippage_bps: 15             # fills slip 0.15% against the trader on buy AND sell
+  commission_per_share: 0.0    # per-share commission (most US brokers: $0)
+  scale_out_fraction: 0.5      # fraction sold at the first target; remainder is trailed
+  min_composite: 0.0           # only take signals at/above this composite rank
+  # trail uses risk.atr_stop_mult; time stop uses risk.time_stop_days; target uses
+  # risk.first_target_r — kept single-sourced so the live screen and backtest agree.

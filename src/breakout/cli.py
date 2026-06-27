@@ -4,6 +4,7 @@
     breakout screen SYM [SYM...]      # screen named symbols from the local bar cache
     breakout fetch  SYM [SYM...]      # download bars from Alpaca into the cache
     breakout scan   [--top N]         # screen every symbol in the cache
+    breakout backtest SYM [SYM...]    # simulate the strategy on cached bars
     breakout universe [--save FILE]   # list tradeable US equities from Alpaca
 """
 from __future__ import annotations
@@ -12,6 +13,8 @@ import argparse
 import json
 import sys
 from pathlib import Path
+
+import pandas as pd
 
 from .config import Settings
 from .data.store import BarStore
@@ -173,6 +176,84 @@ def cmd_scan(args) -> int:
     return 0
 
 
+def _print_backtest(res) -> None:
+    start, end = res.window
+    print(f"\n=== BACKTEST {res.symbol} ===")
+    print(f"  window     : {start.date()} → {end.date()}  ({res.equity.get('n_bars', 0)} bars)")
+    print(f"  signals    : {res.n_signals}")
+    print(f"  trades     : {res.metrics.get('n', 0)}")
+
+    m = res.metrics
+    if m.get("n", 0):
+        pf = m["profit_factor"]
+        pf_str = "inf" if pf == float("inf") else f"{pf:.2f}"
+        print(f"\n  win_rate     : {m['win_rate'] * 100:.1f}%")
+        print(f"  avg_win_r    : {m['avg_win_r']:+.2f}R")
+        print(f"  avg_loss_r   : {m['avg_loss_r']:+.2f}R")
+        print(f"  expectancy_r : {m['expectancy_r']:+.2f}R / trade")
+        print(f"  profit_factor: {pf_str}")
+        print(f"  total_r      : {m['total_r']:+.2f}R")
+        print(f"  avg_hold     : {m['avg_bars_held']:.1f} bars")
+
+    e = res.equity
+    if e.get("n_bars", 0):
+        print(f"\n  return       : {e['total_return_pct']:+.2f}%   "
+              f"(${e['start_equity']:,.0f} → ${e['end_equity']:,.0f})")
+        print(f"  max_drawdown : {e['max_drawdown_pct']:.2f}%")
+        print(f"  buy & hold   : {res.buy_hold_pct:+.2f}%   "
+              f"<- strategy {'BEAT' if e['total_return_pct'] > res.buy_hold_pct else 'TRAILED'} "
+              f"buy-and-hold")
+
+
+def _print_trades(res) -> None:
+    if not res.trades:
+        return
+    print("\n  Trades:")
+    hdr = (f"    {'ENTRY':<12} {'EXIT':<12} {'IN':>8} {'OUT':>8} "
+           f"{'SH':>5} {'BARS':>4} {'R':>6}  REASON")
+    print(hdr)
+    print("    " + "-" * (len(hdr) - 4))
+    for t in res.trades:
+        ed = t.entry_date.date() if t.entry_date is not None else "?"
+        xd = t.exit_date.date() if t.exit_date is not None else "?"
+        print(f"    {str(ed):<12} {str(xd):<12} {t.entry:>8.2f} {t.exit:>8.2f} "
+              f"{t.shares:>5} {t.bars_held:>4} {t.r_multiple:>+6.2f}  {t.exit_reason}")
+
+
+def cmd_backtest(args) -> int:
+    from .backtest.engine import BacktestConfig, backtest_symbol
+
+    settings = Settings.load(args.config)
+    store = BarStore(args.cache)
+
+    if not store.has(args.benchmark):
+        print(f"benchmark bars for {args.benchmark} not in cache. "
+              f"Run: breakout fetch {args.benchmark}", file=sys.stderr)
+        return 2
+    bench = store.load(args.benchmark)
+    config = BacktestConfig.from_settings(settings, account_equity=args.equity)
+    config.min_composite = args.min_composite
+
+    for sym in args.symbols:
+        if not store.has(sym):
+            print(f"skip {sym}: not in cache (run: breakout fetch {sym})", file=sys.stderr)
+            continue
+        df = store.load(sym)
+
+        # Default test window = trailing --lookback-days; earlier bars are warmup.
+        start = args.start
+        if start is None and args.end is None:
+            cutoff = df.index[-1] - pd.Timedelta(days=args.lookback_days)
+            start = cutoff if cutoff > df.index[0] else None
+
+        res = backtest_symbol(sym, df, bench, settings, config,
+                              start=start, end=args.end)
+        _print_backtest(res)
+        if args.verbose:
+            _print_trades(res)
+    return 0
+
+
 def cmd_universe(args) -> int:
     """Fetch the list of active, tradeable US equity symbols from Alpaca."""
     from .data.alpaca import AlpacaProvider
@@ -235,6 +316,21 @@ def main(argv=None) -> int:
     sc.add_argument("--top", type=int, default=20, help="rows to show (default: 20)")
     sc.add_argument("--cache", default="data/cache")
     sc.set_defaults(func=cmd_scan)
+
+    # backtest -----------------------------------------------------------
+    b = sub.add_parser("backtest", help="simulate the strategy on cached bars")
+    b.add_argument("symbols", nargs="+", metavar="SYM")
+    b.add_argument("--benchmark", default="SPY")
+    b.add_argument("--start", default=None, help="test-window start (YYYY-MM-DD)")
+    b.add_argument("--end", default=None, help="test-window end (YYYY-MM-DD)")
+    b.add_argument("--lookback-days", type=int, default=365,
+                   help="if no --start/--end, test the trailing N days (default: 365)")
+    b.add_argument("--equity", type=float, default=100_000.0)
+    b.add_argument("--min-composite", type=float, default=0.0,
+                   help="only take signals at/above this composite rank")
+    b.add_argument("--verbose", action="store_true", help="print the per-trade log")
+    b.add_argument("--cache", default="data/cache")
+    b.set_defaults(func=cmd_backtest)
 
     # universe -----------------------------------------------------------
     u = sub.add_parser("universe", help="list active US equity symbols from Alpaca")

@@ -179,6 +179,84 @@ breakout scan --top 20
 
 ---
 
+## Backtesting
+
+`scan` and `screen` tell you what looks good *today*. **Backtesting** answers the real question:
+*if I had taken these signals over the past year, would I have made money?*
+
+The engine replays history one day at a time — using only the data that existed on each day (no
+look-ahead) — and simulates the full trade lifecycle:
+
+- **Entry** on the next bar's open after a signal (with slippage)
+- **Initial stop** at the technical level (below the pivot / 1.5×ATR)
+- **Scale-out** — sell half at the first target (2.5R), move the stop to breakeven
+- **Trailing stop** — trail the remaining half by an ATR chandelier stop
+- **Time decay** — if the trade hasn't reached its target within 15 bars, cut it
+
+### Run it on one stock, one year back
+
+The backtest needs warmup history for the moving averages, so fetch ~2 years (1yr warmup +
+1yr test):
+
+```bash
+breakout fetch SNDK --lookback 730
+breakout backtest SNDK --verbose
+```
+
+Sample output (numbers are illustrative — run it for the real figures):
+
+```
+=== BACKTEST SNDK ===
+  window     : 2024-06-26 → 2025-06-26  (250 bars)
+  signals    : 3          # times a breakout fired
+  trades     : 3          # positions actually taken
+
+  win_rate     : 66.7%
+  avg_win_r    : +3.10R    # winners average +3.1× the risk unit
+  avg_loss_r   : -0.98R    # losers cut at ~ -1R, as designed
+  expectancy_r : +1.74R / trade   # positive edge per trade
+  profit_factor: 4.20
+  total_r      : +5.22R
+  avg_hold     : 18.3 bars
+
+  return       : +3.91%   ($100,000 → $103,914)
+  max_drawdown : -1.20%
+  buy & hold   : +12.40%   <- strategy TRAILED buy-and-hold
+
+  Trades:
+    ENTRY        EXIT               IN      OUT    SH BARS      R  REASON
+    ---------------------------------------------------------------------
+    2024-08-12   2024-09-20      42.10    51.30   178   28  +3.10  trail
+    2024-11-04   2024-11-06      48.50    47.55   195    2  -0.98  stop
+    2025-02-18   2025-04-01      55.20    66.90   150   31  +3.10  trail
+```
+
+### Reading the result
+
+- **`expectancy_r`** is the headline number — positive means the system made money per trade in
+  risk-adjusted terms. This is the "did it succeed?" verdict.
+- **`R` (R-multiple)** is profit measured in risk units: +3.10R means the trade made 3.1× what it
+  risked. Losers should cluster near −1R.
+- **`REASON`** shows how each trade closed: `trail` (trailing stop after a scale-out — a managed
+  winner), `stop` (initial stop hit — a clean loss), `time_stop` (time decay), `open` (still
+  open at the end of the window).
+- **return % vs R** — return looks small next to total R because each trade only risks 0.75% of
+  equity (`risk.account_risk_pct`). Raise that to take bigger swings.
+- **buy & hold** is the honesty check. On a stock that ran straight up, buy-and-hold wins because
+  the strategy sits in cash between signals. The strategy earns its keep on **choppy** names by
+  sidestepping drawdowns — compare `max_drawdown` to what holding through the dips would cost.
+
+### Useful flags
+
+```bash
+breakout backtest SNDK --start 2024-01-01 --end 2024-12-31   # explicit window
+breakout backtest SNDK NVDA AAPL                              # several symbols at once
+breakout backtest SNDK --min-composite 0.4                   # only take stronger signals
+breakout backtest SNDK --equity 250000                       # different account size
+```
+
+---
+
 ## Tuning
 
 All thresholds live in [`config/settings.yaml`](config/settings.yaml). Every number there is
@@ -232,8 +310,8 @@ BreakoutStrategy/
 │       │   ├── catalyst_llm.py     # LLM catalyst scorer (Phase 6)
 │       │   └── attention.py        # news volume z-score
 │       └── backtest/
-│           ├── engine.py           # point-in-time backtest loop (Phase 4)
-│           └── metrics.py          # R-multiple expectancy metrics
+│           ├── engine.py           # point-in-time loop + position management
+│           └── metrics.py          # R-multiple expectancy + equity/drawdown stats
 └── tests/
     ├── test_indicators.py
     ├── test_funnel.py
@@ -247,7 +325,8 @@ BreakoutStrategy/
 - [x] **Phase 1 — Data layer.** Alpaca adapter, local Parquet cache, shared indicator library.
 - [x] **Phase 2 — Track-A funnel (L0–L4 + risk).** Full gated screen with stop/size output.
 - [ ] **Phase 3 — Portfolio layer.** Heat caps, ADV-participation cap, correlation-aware selection.
-- [~] **Phase 4 — Backtest + calibration.** Metrics done; point-in-time engine is a stub.
+- [x] **Phase 4 — Backtest engine.** Point-in-time loop, position management (scale-out + trail),
+      time decay, equity curve + drawdown, buy-&-hold comparison. Composite calibration still TODO.
 - [~] **Phase 5 — Group / RS layer (L5).** Scoring logic done; cluster construction is a stub.
 - [ ] **Phase 6 — News & theme overlay (L6).** Stubs in place; needs Alpaca news + LLM wiring.
 - [ ] **Phase 7 — Track B (pre-breakout anticipation).** Separate entry inside the base.

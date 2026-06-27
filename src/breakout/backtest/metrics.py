@@ -6,15 +6,24 @@ profit factor; compare every variant to the naive 'buy any 52wk-high close' base
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
+
+import pandas as pd
 
 
 @dataclass
 class Trade:
+    """One closed (or marked-to-market) position from the backtest."""
+
     symbol: str
     entry: float
     stop: float
     exit: float
+    shares: int = 0
     bars_held: int = 0
+    entry_date: Any = None      # pd.Timestamp
+    exit_date: Any = None       # pd.Timestamp
+    exit_reason: str = ""        # stop | trail | time_stop | open
 
     @property
     def r_multiple(self) -> float:
@@ -24,6 +33,10 @@ class Trade:
     @property
     def is_win(self) -> bool:
         return self.exit > self.entry
+
+    @property
+    def pnl(self) -> float:
+        return (self.exit - self.entry) * self.shares
 
 
 def summarize(trades: list[Trade]) -> dict:
@@ -48,3 +61,33 @@ def summarize(trades: list[Trade]) -> dict:
         "total_r": round(sum(rs), 4),
         "avg_bars_held": round(sum(t.bars_held for t in trades) / n, 2),
     }
+
+
+def equity_stats(equity_curve: pd.Series) -> dict:
+    """Return %, max drawdown %, and start/end equity from a mark-to-market equity curve."""
+    if equity_curve is None or equity_curve.empty:
+        return {"n_bars": 0}
+
+    start = float(equity_curve.iloc[0])
+    end = float(equity_curve.iloc[-1])
+    running_max = equity_curve.cummax()
+    drawdown = (equity_curve - running_max) / running_max
+    max_dd = float(drawdown.min())  # most-negative point; 0 if monotonic
+
+    return {
+        "n_bars": int(len(equity_curve)),
+        "start_equity": round(start, 2),
+        "end_equity": round(end, 2),
+        "total_return_pct": round((end / start - 1) * 100, 2) if start else 0.0,
+        "max_drawdown_pct": round(max_dd * 100, 2),
+    }
+
+
+def buy_hold_return(df: pd.DataFrame, start, end) -> float:
+    """Buy-&-hold return (%) of the symbol over [start, end], the success benchmark."""
+    window = df.loc[start:end]
+    if len(window) < 2:
+        return 0.0
+    first = float(window["close"].iloc[0])
+    last = float(window["close"].iloc[-1])
+    return round((last / first - 1) * 100, 2) if first else 0.0

@@ -60,3 +60,46 @@ def make_breakout_series(n: int = 400, seed: int = 7) -> pd.DataFrame:
     df.iloc[-1, df.columns.get_loc("high")] = float(close[-1]) * 1.02  # range expansion
     df.iloc[-1, df.columns.get_loc("low")] = float(close[-2]) * 1.0
     return df
+
+
+def make_trade_path(outcome: str = "win", seed: int = 7) -> pd.DataFrame:
+    """A full trade path for the backtest: warmup uptrend → base → breakout → continuation.
+
+    `make_breakout_series` ends ON the breakout bar, so it cannot be backtested (there is no bar
+    to enter on). This appends a deterministic continuation that produces a known outcome:
+
+    - "win"     : runs well past the first target, then drops sharply → scale-out + trailing exit
+    - "loss"    : falls straight through the initial stop → ~ -1R stop-out
+    - "timeout" : drifts flat (no target, no stop) past the time stop → time-decay exit
+    """
+    base = make_breakout_series(seed=seed)            # ends on the breakout bar
+    breakout_close = float(base["close"].iloc[-1])
+    last_date = base.index[-1]
+
+    P = breakout_close
+    if outcome == "win":
+        # ramp up ~25% over 12 bars, then one sharp -20% bar to trip the trailing stop
+        path = [P * m for m in (1.05, 1.10, 1.14, 1.17, 1.20, 1.22, 1.24,
+                                1.25, 1.26, 1.27, 1.28, 1.29)] + [P * 1.03]
+    elif outcome == "loss":
+        # gap/slide straight down through any reasonable stop within a few bars
+        path = [P * 0.97, P * 0.93, P * 0.88, P * 0.85]
+    elif outcome == "timeout":
+        # hover around the entry: above the stop, below the target, for > time_stop_days bars
+        path = [P * 1.005, P * 0.998] * 12
+    else:
+        raise ValueError(f"unknown outcome: {outcome!r}")
+
+    cont_dates = pd.bdate_range(last_date + pd.Timedelta(days=1), periods=len(path))
+    cont_close = np.asarray(path, dtype=float)
+    cont = pd.DataFrame(
+        {
+            "open": np.r_[breakout_close, cont_close[:-1]],
+            "high": cont_close * 1.01,
+            "low": cont_close * 0.99,
+            "close": cont_close,
+            "volume": np.full(len(path), 1_200_000.0),
+        },
+        index=pd.DatetimeIndex(cont_dates, name="date"),
+    )
+    return pd.concat([base, cont])
