@@ -1,10 +1,9 @@
 """Attention / abnormality signals (Section 5.3). Cheap, powerful, often LEAD price.
 
 - news-volume spike: z-score of daily article count for a ticker/theme
-- options activity: call-volume & IV jumps (Schwab chains)
 - optional: social-mention / search velocity
 
-The news-volume z-score is implemented (pure function); options/IV need the Schwab feed (Phase 5).
+Implemented: news-volume z-score (pure function). Phase 5+: wire to options chains for IV/volume.
 """
 from __future__ import annotations
 
@@ -25,6 +24,6 @@ def news_volume_zscore(daily_counts: pd.Series, lookback: int = 60) -> float:
 
 
 def options_activity_score(call_volume: float, avg_call_volume: float, iv_change: float) -> float:
-    """Placeholder blend of unusual call volume + IV jump. Wire to Schwab chains in Phase 5."""
+    """Placeholder blend of unusual call volume + IV jump. Phase 5+: wire to options chains."""
     vol_ratio = (call_volume / avg_call_volume) if avg_call_volume else 0.0
     return float(np.clip(0.6 * np.tanh(vol_ratio - 1) + 0.4 * np.tanh(iv_change * 5), 0, 1))

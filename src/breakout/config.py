@@ -40,8 +40,6 @@ class Secrets:
     alpaca_secret: str | None = None
     alpaca_feed: str = "iex"
     alpaca_paper: bool = True     # True = paper endpoint, False = live trading endpoint
-    schwab_app_key: str | None = None
-    schwab_app_secret: str | None = None
     anthropic_key: str | None = None
 
     @classmethod
@@ -52,8 +50,6 @@ class Secrets:
             alpaca_secret=os.getenv("ALPACA_SECRET_KEY"),
             alpaca_feed=os.getenv("ALPACA_DATA_FEED", "iex"),
             alpaca_paper=os.getenv("ALPACA_PAPER", "true").lower() == "true",
-            schwab_app_key=os.getenv("SCHWAB_APP_KEY"),
-            schwab_app_secret=os.getenv("SCHWAB_APP_SECRET"),
             anthropic_key=os.getenv("ANTHROPIC_API_KEY"),
         )
 

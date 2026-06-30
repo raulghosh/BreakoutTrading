@@ -1,6 +1,4 @@
-"""Provider-agnostic interfaces. Concrete adapters (Alpaca, Schwab) implement these so the rest
-of the system never imports a vendor SDK directly.
-"""
+"""Provider-agnostic interfaces. Alpaca adapter implements these so vendor SDK is isolated."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -12,13 +10,10 @@ import pandas as pd
 
 @runtime_checkable
 class BarProvider(Protocol):
-    """Returns back-adjusted OHLCV bars indexed by date (ascending)."""
+    """Returns split-adjusted OHLCV bars indexed by date (ascending)."""
 
     def daily_bars(self, symbol: str, start: datetime, end: datetime) -> pd.DataFrame:
-        """Columns: open, high, low, close, volume. Split/dividend adjusted."""
-        ...
-
-    def weekly_bars(self, symbol: str, start: datetime, end: datetime) -> pd.DataFrame:
+        """Columns: open, high, low, close, volume. Split-adjusted."""
         ...
 
 

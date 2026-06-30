@@ -1,4 +1,4 @@
-"""Alpaca adapter — daily/weekly bars (split-adjusted + total-return) and news.
+"""Alpaca adapter — split-adjusted daily bars and news.
 
 Requires:
     pip install -e '.[data]'
@@ -8,10 +8,6 @@ And in .env:
     ALPACA_SECRET_KEY=your_secret
     ALPACA_DATA_FEED=iex          # or sip (paid tier, full tape)
     ALPACA_PAPER=true             # true = paper account endpoint, false = live
-
-Adjustment policy (design doc §4):
-    daily_bars()        → Adjustment.SPLIT   (for breakout levels, pivots, ATR, MAs)
-    total_return_bars() → Adjustment.ALL     (for RS line and backtest P&L)
 """
 from __future__ import annotations
 
@@ -148,29 +144,6 @@ class AlpacaProvider(BarProvider, NewsProvider):
     def daily_bars(self, symbol: str, start: datetime, end: datetime) -> pd.DataFrame:
         """Split-adjusted OHLCV — breakout levels, pivots, ATR, MA stack."""
         return self._fetch_bars(symbol, start, end, "split")
-
-    def total_return_bars(self, symbol: str, start: datetime, end: datetime) -> pd.DataFrame:
-        """Split + dividend adjusted OHLCV — RS line and backtest P&L."""
-        return self._fetch_bars(symbol, start, end, "all")
-
-    def weekly_bars(self, symbol: str, start: datetime, end: datetime) -> pd.DataFrame:
-        try:
-            from alpaca.data.requests import StockBarsRequest
-            from alpaca.data.timeframe import TimeFrame
-            from alpaca.data.enums import Adjustment
-        except ImportError as exc:
-            raise RuntimeError("Run: pip install -e '.[data]'") from exc
-
-        client = self._require_hist_client()
-        req = StockBarsRequest(
-            symbol_or_symbols=symbol,
-            timeframe=TimeFrame.Week,
-            start=start,
-            end=end,
-            adjustment=Adjustment.SPLIT,
-            feed=self._feed_enum(),
-        )
-        return _to_df(client.get_stock_bars(req), symbol)
 
     # ------------------------------------------------------------------
     # Universe
