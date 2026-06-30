@@ -19,6 +19,7 @@ import pandas as pd
 from .config import Settings
 from .data.store import BarStore
 from .screen.funnel import screen_symbol
+from .screen.l6_catalyst import CatalystContext
 
 
 # ---------------------------------------------------------------------------
@@ -99,6 +100,23 @@ def cmd_fetch(args) -> int:
     return 0 if not failed else 1
 
 
+def _fetch_catalyst(sym: str, as_of, args) -> CatalystContext | None:
+    """Fetch news and score catalyst for `sym`. Returns None if --news not set or fetch fails."""
+    if not getattr(args, "news", False):
+        return None
+    try:
+        from datetime import timedelta
+        from .data.alpaca import AlpacaProvider
+        from .news.catalyst_llm import score_catalyst
+        provider = AlpacaProvider()
+        start = as_of - timedelta(days=14)
+        items = provider.news(sym, start, as_of)
+        return score_catalyst(sym, items, as_of=as_of)
+    except Exception as exc:
+        print(f"  [news] {sym}: {exc}", file=sys.stderr)
+        return None
+
+
 def cmd_screen(args) -> int:
     settings = Settings.load(args.config)
     store = BarStore(args.cache)
@@ -113,8 +131,11 @@ def cmd_screen(args) -> int:
         if not store.has(sym):
             print(f"skip {sym}: not in cache (run: breakout fetch {sym})", file=sys.stderr)
             continue
-        cand = screen_symbol(sym, store.load(sym), settings, benchmark_df=bench,
-                             account_equity=args.equity)
+        df = store.load(sym)
+        as_of = df.index[-1].to_pydatetime()
+        catalyst_ctx = _fetch_catalyst(sym, as_of, args)
+        cand = screen_symbol(sym, df, settings, benchmark_df=bench,
+                             account_equity=args.equity, catalyst_ctx=catalyst_ctx)
         _print_candidate(cand)
         if cand.passed_gates:
             survivors.append(cand)
@@ -146,8 +167,10 @@ def cmd_scan(args) -> int:
     survivors, rejected_counts = [], {}
     for sym in symbols:
         df = store.load(sym)
+        as_of = df.index[-1].to_pydatetime()
+        catalyst_ctx = _fetch_catalyst(sym, as_of, args)
         cand = screen_symbol(sym, df, settings, benchmark_df=bench,
-                             account_equity=args.equity)
+                             account_equity=args.equity, catalyst_ctx=catalyst_ctx)
         if cand.passed_gates:
             survivors.append(cand)
         else:
@@ -307,6 +330,8 @@ def main(argv=None) -> int:
     s.add_argument("--benchmark", default="SPY")
     s.add_argument("--cache", default="data/cache")
     s.add_argument("--equity", type=float, default=100_000.0)
+    s.add_argument("--news", action="store_true",
+                   help="fetch Alpaca news and score catalyst with Claude (requires ANTHROPIC_API_KEY)")
     s.set_defaults(func=cmd_screen)
 
     # scan ---------------------------------------------------------------
@@ -315,6 +340,8 @@ def main(argv=None) -> int:
     sc.add_argument("--equity", type=float, default=100_000.0)
     sc.add_argument("--top", type=int, default=20, help="rows to show (default: 20)")
     sc.add_argument("--cache", default="data/cache")
+    sc.add_argument("--news", action="store_true",
+                    help="fetch Alpaca news and score catalyst with Claude (requires ANTHROPIC_API_KEY)")
     sc.set_defaults(func=cmd_scan)
 
     # backtest -----------------------------------------------------------
